@@ -1,0 +1,26 @@
+{
+  "0":{
+    "E-Mail":"m@m.de",
+    "Matrikelnummer":0,
+    "Nachname":"Mustermann",
+    "Semester":1,
+    "Studiengang":"AI",
+    "Vorname":"Max"
+  },
+  "1":{
+    "E-Mail":"jane@doe.de",
+    "Matrikelnummer":1,
+    "Nachname":"Doe",
+    "Semester":3,
+    "Studiengang":"MI",
+    "Vorname":"Jane"
+  },
+  "2":{
+    "E-Mail":"john@doe.de",
+    "Matrikelnummer":2,
+    "Nachname":"Doe",
+    "Semester":5,
+    "Studiengang":"TI",
+    "Vorname":"John"
+  }
+}
