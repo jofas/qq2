@@ -21,46 +21,91 @@ var client = redis.NewClient(&redis.Options{
 
 type Id struct {}
 
+// return student with {id}
 func (i Id) Get(
   w http.ResponseWriter, r *http.Request,
 ) {
-  id, err := strconv.Atoi(mux.Vars(r)["id"])
-  if err != nil {
-    io.WriteString(w, "-1")
+  id := mux.Vars(r)["id"]
+
+  student, err := client.HGetAll(id).Result()
+
+  fmt.Println(student)
+
+  if err != nil || len(student) == 0 {
+    fmt.Println("ERROR: 'HGETALL id' did not work")
+    w.WriteHeader(404)
     return
   }
 
+  json, err := json.Marshal(student)
 
-  fmt.Println(id)
+  if err != nil {
+    fmt.Println("ERROR: parsing student did not work")
+    w.WriteHeader(500)
+    return
+  }
 
-  io.WriteString(w, "Hello, id GET!")
+  io.WriteString(w, string(json))
 }
 
+// update student
 func (i Id) Patch(
   w http.ResponseWriter, r *http.Request,
 ){
-  id, err := strconv.Atoi(mux.Vars(r)["id"])
-  if err != nil {
-    io.WriteString(w, "-1")
+  id := mux.Vars(r)["id"]
+
+  b := make([]byte, 1024)
+
+  n, err := r.Body.Read(b)
+
+  if err != nil && err != io.EOF {
+    fmt.Println("ERROR: Reading HTTP Body did not work")
+    w.WriteHeader(500)
     return
   }
-  fmt.Println(id)
 
-  io.WriteString(w, "Hello, id Patch!")
+  u_student := map[string]interface{}{}
+
+  if err := json.Unmarshal(b[:n], &u_student);err != nil {
+    fmt.Println("ERROR: JSON parsing did not work")
+    w.WriteHeader(500)
+    return
+  }
+
+  if _, err := client.HMSet(id, u_student).Result();
+  err != nil {
+    fmt.Println("ERROR: HMSET did not work")
+    w.WriteHeader(500)
+    return
+  }
+
+  // OK
+  w.WriteHeader(200)
 }
 
+// delete student
 func (i Id) Delete(
   w http.ResponseWriter, r *http.Request,
 ) {
+  id := mux.Vars(r)["id"]
 
-  id, err := strconv.Atoi(mux.Vars(r)["id"])
+  amount, err := client.Del(id).Result()
+
   if err != nil {
-    io.WriteString(w, "-1")
+    fmt.Println("ERROR: 'DEL id' did not work")
+    w.WriteHeader(500)
     return
   }
-  fmt.Println(id)
 
-  io.WriteString(w, "Hello, id Delete!")
+  // no student was deleted -> student did not exists so
+  // 404
+  if amount == 0 {
+    w.WriteHeader(404)
+    return
+  }
+
+  // OK
+  w.WriteHeader(200)
 }
 
 
@@ -68,65 +113,116 @@ type Students struct {
   id Id
 }
 
-// gib alle studenten aus
+// return all students
 func (s Students) Get(
   w http.ResponseWriter, r *http.Request,
 ) {
+  // get all keys safed in redis
   keys, err := client.Keys("*").Result()
 
   if err != nil {
-    io.WriteString(w, "-1")
+    fmt.Println("ERROR: 'KEYS *' did not work")
+    w.WriteHeader(500)
     return
   }
 
-  students := map[string]map[string]interface{}{}
+  // map containing all students at the end
+  students := map[string]map[string]string{}
 
-  for key := range keys {
-    val, err := client.HGetAll(strconv.Itoa(key)).Result()
+  // iterate redis keys
+  for _, key := range keys {
+    // we only return students and not our next id variable
+    if key == "next" { continue }
+
+    // get the student at key from redis
+    val, err := client.HGetAll(key).Result()
 
     if err != nil {
-      io.WriteString(w, "-1")
+      fmt.Println("ERROR: 'HGETALL key' did not work")
+      w.WriteHeader(500)
       return
     }
 
-    n_val := map[string]interface{}{}
-
-    for k, v := range val {
-      if k == "Matrikelnummer" || k == "Semester" {
-        vi, err := strconv.Atoi(v)
-
-        if err != nil {
-          io.WriteString(w, "-1")
-          return
-        }
-
-        n_val[k] = vi
-      } else {
-        n_val[k] = v
-      }
-    }
-
-    students[strconv.Itoa(key)] = n_val
+    students[key] = val
   }
 
+  // parse students to JSON
   json, err := json.Marshal(students)
 
   if err != nil {
-    io.WriteString(w, "-1")
+    fmt.Println("ERROR: parsing students did not work")
+    w.WriteHeader(500)
     return
   }
 
+  // return the JSON
   io.WriteString(w, string(json))
 }
 
-// leg neuen studenten an
+// add new student
 func (s Students) Post(
   w http.ResponseWriter, r *http.Request,
 ){
-  io.WriteString(w, "Hello, POST!")
+
+  // get next id
+  s_next, err := client.Get("next").Result()
+
+  if err != nil {
+    fmt.Println("ERROR: 'GET next' did not work")
+    w.WriteHeader(500)
+    return
+  }
+
+  // parse s_next to int
+  next, err2 := strconv.Atoi(s_next)
+
+  if err2 != nil {
+    fmt.Println("ERROR: parsing next did not work")
+    w.WriteHeader(500)
+    return
+  }
+
+  b := make([]byte, 1024)
+
+  // create new student
+  n, err := r.Body.Read(b)
+
+  if err != nil && err != io.EOF {
+    fmt.Println("ERROR: Reading HTTP Body did not work")
+    w.WriteHeader(500)
+    return
+  }
+
+  n_student := map[string]interface{}{}
+
+  // parse JSON
+  if err := json.Unmarshal(b[:n], &n_student);err != nil {
+    fmt.Println("ERROR: JSON parsing did not work")
+    w.WriteHeader(500)
+    return
+  }
+
+  // set new student
+  if _, err := client.HMSet(s_next, n_student).Result();
+  err != nil {
+    fmt.Println("ERROR: HMSET did not work")
+    w.WriteHeader(500)
+    return
+  }
+
+  // increment next
+  if _, err := client.Set("next", next + 1, 0).Result();
+  err != nil {
+    fmt.Println("ERROR: 'SET next' did not work")
+    w.WriteHeader(500)
+    return
+  }
+
+  io.WriteString(w, s_next)
 }
 
 func main() {
+
   // REST API
   students := Students{id:Id{}}
 
@@ -160,7 +256,7 @@ func main() {
 
   // serve API with the Webserver from stdlib
   http.Handle("/", r)
-  http.ListenAndServe("0.0.0.0:8000", nil)
+  http.ListenAndServe("0.0.0.0:8080", nil)
 }
 
 // import some example students as json
