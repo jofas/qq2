@@ -53,3 +53,9 @@ sudo zypper install redis
 #### Time
 
 195 Minutes
+
+## Task 4
+
+#### Time
+
+283 Minutes
