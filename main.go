@@ -21,16 +21,12 @@ var client = redis.NewClient(&redis.Options{
   DB       : 0,
 })
 
-// global reference to the producer (for the messaging)
-//var producer kafka.Producer
-// mutex for using the producer
-//var m_producer = &sync.Mutex{}
-
-const msg_template =
-  "{service_name:1_GoKit_2,operation:'%s',message:'%s',}"
+const msg_template = "{'service_name':'1_GoKit_2'," +
+  "'operation':'%s','message':'%s',}"
 
 var topic = "logging"
 
+// global reference to the producer (for the messaging)
 var producer = initProducer()
 
 func initProducer() kafka.Producer {

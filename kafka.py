@@ -1,10 +1,10 @@
 from confluent_kafka import Producer
 
 msg = \
-"""{
-service_name: 1_GoKit_2,
-operation: "Test",
-message: "Test"
+b"""{
+"service_name": "1_GoKit_2",
+"operation": "Test",
+"message": "Test"
 }"""
 
 print(msg)
@@ -19,6 +19,6 @@ def cb(err, msg):
 
 p.poll(0)
 
-p.produce('logging', msg.encode('ascii'), callback=cb)
+p.produce('logging', msg, callback=cb)
 
 p.flush()
