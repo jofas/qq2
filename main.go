@@ -7,9 +7,11 @@ import (
   "io"
   "os"
   "net/http"
+  //"sync"
 )
 import "github.com/go-redis/redis"
 import "github.com/gorilla/mux"
+import "github.com/confluentinc/confluent-kafka-go/kafka"
 
 // global reference to the redis client. The client is
 // threadsafe
@@ -18,6 +20,40 @@ var client = redis.NewClient(&redis.Options{
   Password : "",
   DB       : 0,
 })
+
+// global reference to the producer (for the messaging)
+//var producer kafka.Producer
+// mutex for using the producer
+//var m_producer = &sync.Mutex{}
+
+const msg_template =
+  "{service_name:1_GoKit_2,operation:'%s',message:'%s',}"
+
+var topic = "logging"
+
+var producer = initProducer()
+
+func initProducer() kafka.Producer {
+  producer, err := kafka.NewProducer(&kafka.ConfigMap{
+    "bootstrap.servers": "qq2.ddnss.de:9092",
+  })
+  if err != nil {
+    panic(err)
+  }
+  return *producer
+}
+
+func log(op string, msg string) {
+  if err := producer.Produce(&kafka.Message{
+    TopicPartition: kafka.TopicPartition{
+      Topic: &topic,
+      Partition: kafka.PartitionAny,
+    },
+    Value: []byte(fmt.Sprintf(msg_template, op, msg)),
+  }, nil); err != nil {
+    fmt.Println(err)
+  }
+}
 
 type Id struct {}
 
@@ -29,10 +65,9 @@ func (i Id) Get(
 
   student, err := client.HGetAll(id).Result()
 
-  fmt.Println(student)
-
   if err != nil || len(student) == 0 {
     fmt.Println("ERROR: 'HGETALL id' did not work")
+    log("GET students/"+id, "404")
     w.WriteHeader(404)
     return
   }
@@ -41,11 +76,13 @@ func (i Id) Get(
 
   if err != nil {
     fmt.Println("ERROR: parsing student did not work")
+    log("GET students/"+id, "500")
     w.WriteHeader(500)
     return
   }
 
   io.WriteString(w, string(json))
+  log("GET students/"+id, "200")
 }
 
 // update student
@@ -60,6 +97,7 @@ func (i Id) Patch(
 
   if err != nil && err != io.EOF {
     fmt.Println("ERROR: Reading HTTP Body did not work")
+    log("PATCH students/"+id, "500")
     w.WriteHeader(500)
     return
   }
@@ -68,6 +106,7 @@ func (i Id) Patch(
 
   if err := json.Unmarshal(b[:n], &u_student);err != nil {
     fmt.Println("ERROR: JSON parsing did not work")
+    log("PATCH students/"+id, "500")
     w.WriteHeader(500)
     return
   }
@@ -75,12 +114,14 @@ func (i Id) Patch(
   if _, err := client.HMSet(id, u_student).Result();
   err != nil {
     fmt.Println("ERROR: HMSET did not work")
+    log("PATCH students/"+id, "500")
     w.WriteHeader(500)
     return
   }
 
   // OK
   w.WriteHeader(200)
+  log("PATCH students/"+id, "200")
 }
 
 // delete student
@@ -93,6 +134,7 @@ func (i Id) Delete(
 
   if err != nil {
     fmt.Println("ERROR: 'DEL id' did not work")
+    log("DELETE students/"+id, "500")
     w.WriteHeader(500)
     return
   }
@@ -100,12 +142,14 @@ func (i Id) Delete(
   // no student was deleted -> student did not exists so
   // 404
   if amount == 0 {
+    log("DELETE students/"+id, "404")
     w.WriteHeader(404)
     return
   }
 
   // OK
   w.WriteHeader(200)
+  log("DELETE students/"+id, "200")
 }
 
 
@@ -122,6 +166,7 @@ func (s Students) Get(
 
   if err != nil {
     fmt.Println("ERROR: 'KEYS *' did not work")
+    log("GET students/", "500")
     w.WriteHeader(500)
     return
   }
@@ -139,6 +184,7 @@ func (s Students) Get(
 
     if err != nil {
       fmt.Println("ERROR: 'HGETALL key' did not work")
+      log("GET students/", "500")
       w.WriteHeader(500)
       return
     }
@@ -151,12 +197,14 @@ func (s Students) Get(
 
   if err != nil {
     fmt.Println("ERROR: parsing students did not work")
+    log("GET students/", "500")
     w.WriteHeader(500)
     return
   }
 
   // return the JSON
   io.WriteString(w, string(json))
+  log("GET students/", "200")
 }
 
 // add new student
@@ -169,6 +217,7 @@ func (s Students) Post(
 
   if err != nil {
     fmt.Println("ERROR: 'GET next' did not work")
+    log("POST students/", "500")
     w.WriteHeader(500)
     return
   }
@@ -178,6 +227,7 @@ func (s Students) Post(
 
   if err2 != nil {
     fmt.Println("ERROR: parsing next did not work")
+    log("POST students/", "500")
     w.WriteHeader(500)
     return
   }
@@ -189,6 +239,7 @@ func (s Students) Post(
 
   if err != nil && err != io.EOF {
     fmt.Println("ERROR: Reading HTTP Body did not work")
+    log("POST students/", "500")
     w.WriteHeader(500)
     return
   }
@@ -198,6 +249,7 @@ func (s Students) Post(
   // parse JSON
   if err := json.Unmarshal(b[:n], &n_student);err != nil {
     fmt.Println("ERROR: JSON parsing did not work")
+    log("POST students/", "500")
     w.WriteHeader(500)
     return
   }
@@ -206,6 +258,7 @@ func (s Students) Post(
   if _, err := client.HMSet(s_next, n_student).Result();
   err != nil {
     fmt.Println("ERROR: HMSET did not work")
+    log("POST students/", "500")
     w.WriteHeader(500)
     return
   }
@@ -214,14 +267,36 @@ func (s Students) Post(
   if _, err := client.Set("next", next + 1, 0).Result();
   err != nil {
     fmt.Println("ERROR: 'SET next' did not work")
+    log("POST students/", "500")
     w.WriteHeader(500)
     return
   }
 
   io.WriteString(w, s_next)
+  log("POST students/", "200")
 }
 
 func main() {
+  // shut producer (global variable) down when process
+  // stops
+  defer producer.Close()
+
+  // print report whether a message was successful or not
+  go func() {
+    for e := range producer.Events() {
+      switch ev := e.(type) {
+      case *kafka.Message:
+        if ev.TopicPartition.Error != nil {
+          fmt.Printf(
+            "ERROR: logging failed: %v\n",
+            ev.TopicPartition,
+          )
+        } else {
+          fmt.Printf("SUCCES: %v\n", ev.TopicPartition)
+        }
+      }
+    }
+  }()
 
   // REST API
   students := Students{id:Id{}}
